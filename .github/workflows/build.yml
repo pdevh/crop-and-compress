@@ -1,0 +1,141 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS App
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pyinstaller
+
+      # Discover the python entry point dynamically to make it plug-and-play
+      - name: Discover entry point and Build
+        run: |
+          ENTRY_POINT="crop_and_compress.py"
+          if [ ! -f "$ENTRY_POINT" ]; then
+            ENTRY_POINT=$(ls *.py | head -n 1)
+          fi
+          echo "Building entry point: $ENTRY_POINT"
+          pyinstaller --noconfirm --clean --windowed "$ENTRY_POINT"
+
+      - name: Zip macOS App Bundle
+        run: |
+          cd dist
+          APP_NAME=$(ls -d *.app | head -n 1)
+          ZIP_NAME="${APP_NAME%.app}_macOS.zip"
+          zip -r "$ZIP_NAME" "$APP_NAME"
+          # Keep only the zip in dist for upload
+          mv "$ZIP_NAME" ../
+          cd ..
+          rm -rf dist build *.spec
+          mkdir dist
+          mv "$ZIP_NAME" dist/
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-binaries
+          path: dist/*
+
+  build-windows:
+    name: Build Windows App
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if (Test-Path requirements.txt) { pip install -r requirements.txt }
+          pip install pyinstaller
+
+      # Discover entry point dynamically on Windows
+      - name: Discover entry point and Build
+        shell: bash
+        run: |
+          ENTRY_POINT="crop_and_compress.py"
+          if [ ! -f "$ENTRY_POINT" ]; then
+            ENTRY_POINT=$(ls *.py | head -n 1)
+          fi
+          echo "Building entry point: $ENTRY_POINT"
+          pyinstaller --noconfirm --clean --onefile --windowed "$ENTRY_POINT"
+
+      - name: Prepare Windows Artifact
+        shell: bash
+        run: |
+          # Clean up everything except the exe inside dist
+          cd dist
+          EXE_NAME=$(ls *.exe | head -n 1)
+          cd ..
+          rm -rf build *.spec
+          # Keep only the exe
+          mkdir -p dist_clean
+          mv dist/"$EXE_NAME" dist_clean/
+          rm -rf dist
+          mv dist_clean dist
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: dist/*
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      # Flatten directory structure so files are directly uploaded to release
+      - name: Prepare release files
+        run: |
+          mkdir dist
+          find release-artifacts -type f -exec mv -t dist/ {} +
+          echo "Files to upload:"
+          ls -la dist/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          body: |
+            Automated release from commit: ${{ github.sha }}
+            
+            ### Assets Included
+            - macOS App Bundle (Zipped)
+            - Windows Executable (.exe)
+          draft: false
+          prerelease: false
+          files: dist/*
