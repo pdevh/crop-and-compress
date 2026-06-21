@@ -1,10 +1,9 @@
 __pycache__/
 *.pyc
-.venv/
+.venv/lib/
 build/
 dist/
 *.spec
 .env
 icon/*
-.agents/*
 .DS_Store
