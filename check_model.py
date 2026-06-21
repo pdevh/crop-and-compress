@@ -1,11 +1,19 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
-from google import genai
+import requests
 
-load_dotenv('/Users/philipp/Coding/crop-and-compress/.env')
-api_key = os.environ.get("GEMINI_API_KEY")
+load_dotenv(Path(__file__).resolve().parent / ".env")
+api_key = os.environ.get("OPENAI_API_KEY")
+if not api_key:
+    raise SystemExit("OPENAI_API_KEY is not set")
 
-client = genai.Client(api_key=api_key)
-model = client.models.get(model="gemini-2.5-flash-image")
-print(f"Model: {model.name}")
-print(f"Supported actions: {model.supported_actions}")
+response = requests.get(
+    "https://api.openai.com/v1/models/gpt-image-2",
+    headers={"Authorization": f"Bearer {api_key}"},
+    timeout=30,
+)
+response.raise_for_status()
+model = response.json()
+print(f"Model: {model.get('id')}")
+print(f"Object: {model.get('object')}")

@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import QLabel, QSizePolicy
 """
 write_file("app/canvas.py", 42, 376, canvas_imports)
 
-# gemini_worker.py: lines 897-1029
+# openai_worker.py: lines 897-1029
 worker_imports = """import os
 import mimetypes
 from pathlib import Path
@@ -34,7 +34,7 @@ from dotenv import load_dotenv
 # Load .env relative to this file
 load_dotenv(Path(__file__).resolve().parent.parent / '.env')
 """
-write_file("app/gemini_worker.py", 901, 1029, worker_imports)
+write_file("app/openai_worker.py", 901, 1029, worker_imports)
 
 # widgets.py: lines 1031-1181
 widgets_imports = """from pathlib import Path
@@ -152,7 +152,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, 
     QMessageBox, QSizePolicy, QScrollArea, QGroupBox, QComboBox, QTextEdit, QFrame
 )
-from .gemini_worker import GeminiWorker, DEFAULT_SYSTEM_PROMPT
+from .openai_worker import OpenAIWorker, DEFAULT_SYSTEM_PROMPT
 from .widgets import ReferenceThumbnail, SkeletonWidget
 """
 write_file("app/generate_tab.py", 1187, 1752, generate_tab_imports)

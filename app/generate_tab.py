@@ -10,7 +10,15 @@ from PyQt6.QtWidgets import (
     QMessageBox, QSizePolicy, QScrollArea, QGroupBox, QComboBox, QTextEdit, QFrame,
     QInputDialog, QLineEdit
 )
-from .gemini_worker import GeminiWorker, DEFAULT_SYSTEM_PROMPT, get_env_path
+from .openai_worker import (
+    OpenAIWorker,
+    DEFAULT_SYSTEM_PROMPT,
+    MAX_REFERENCE_IMAGES,
+    estimate_generation_cost,
+    format_cost_estimate,
+    get_env_path,
+    output_size_for_aspect_ratio,
+)
 from .widgets import ReferenceThumbnail, SkeletonWidget
 
 logger = logging.getLogger("CropAndCompress.GenerateTab")
@@ -27,7 +35,7 @@ class GenerateTab(QWidget):
         self.output_dir: Path | None = None
         self.generated_images: list[tuple[bytes, str]] = []  # (data, mime_type)
         self._current_result_idx = 0
-        self._worker: GeminiWorker | None = None
+        self._worker: OpenAIWorker | None = None
         self._text_response = ""
         
         self._build_ui()
@@ -98,6 +106,7 @@ class GenerateTab(QWidget):
         self.prompt_edit.setPlaceholderText("Describe what you want to generate…\ne.g. 'A fierce tiger in traditional Japanese woodblock print style'")
         self.prompt_edit.setMinimumHeight(80)
         self.prompt_edit.setMaximumHeight(120)
+        self.prompt_edit.textChanged.connect(self._update_cost_estimate)
 
         prompt_layout.addWidget(self.prompt_edit)
         left_panel.addWidget(prompt_group)
@@ -115,6 +124,7 @@ class GenerateTab(QWidget):
         self.system_prompt_edit.setVisible(False)
         self.system_prompt_edit.setMinimumHeight(100)
         self.system_prompt_edit.setMaximumHeight(180)
+        self.system_prompt_edit.textChanged.connect(self._update_cost_estimate)
 
         left_panel.addWidget(self.system_prompt_edit)
         
@@ -127,6 +137,7 @@ class GenerateTab(QWidget):
         self.aspect_combo = QComboBox()
         self.aspect_combo.addItems(["1:1", "3:4", "4:3", "9:16", "16:9"])
         self.aspect_combo.setCurrentText("3:4")
+        self.aspect_combo.currentTextChanged.connect(self._update_cost_estimate)
         ar_layout.addWidget(self.aspect_combo)
         settings_row.addWidget(ar_group)
         
@@ -161,6 +172,11 @@ class GenerateTab(QWidget):
         self.cancel_btn.clicked.connect(self._cancel_generation)
         self.cancel_btn.setVisible(False)
         left_panel.addWidget(self.cancel_btn)
+
+        self._cost_estimate_label = QLabel("")
+        self._cost_estimate_label.setStyleSheet("color: #888; font-size: 12px;")
+        self._cost_estimate_label.setWordWrap(True)
+        left_panel.addWidget(self._cost_estimate_label)
         
         left_panel.addStretch()
         
@@ -219,6 +235,7 @@ class GenerateTab(QWidget):
         right_panel.addLayout(result_bar)
         
         main_layout.addLayout(right_panel, 1)
+        self._update_cost_estimate()
     
     # ── System prompt toggle ─────────────────────────────────────────────
     
@@ -270,6 +287,25 @@ class GenerateTab(QWidget):
                 self._ref_flow_layout.addWidget(thumb)
         
         self._ref_count_label.setText(f"{len(self.reference_paths)} image{'s' if len(self.reference_paths) != 1 else ''}")
+        self._update_cost_estimate()
+
+    def _update_cost_estimate(self):
+        if not hasattr(self, "_cost_estimate_label"):
+            return
+
+        prompt = self.prompt_edit.toPlainText().strip()
+        system_prompt = self.system_prompt_edit.toPlainText().strip() or DEFAULT_SYSTEM_PROMPT
+        aspect_ratio = self.aspect_combo.currentText()
+        output_size = output_size_for_aspect_ratio(aspect_ratio)
+        estimate = estimate_generation_cost(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            image_paths=list(self.reference_paths),
+            output_size=output_size,
+        )
+        self._cost_estimate_label.setText(
+            f"{format_cost_estimate(estimate)} • output {output_size}"
+        )
     
     # ── Drag & drop for references ───────────────────────────────────────
     
@@ -318,6 +354,15 @@ class GenerateTab(QWidget):
         
         logger.info(f"Initiating generation. Prompt: '{prompt[:60]}...' ({len(prompt)} chars)")
         logger.info(f"References selected: {[str(p) for p in self.reference_paths]}")
+
+        if len(self.reference_paths) > MAX_REFERENCE_IMAGES:
+            QMessageBox.warning(
+                self,
+                "Too many references",
+                f"GPT Image 2 supports up to {MAX_REFERENCE_IMAGES} reference images. "
+                f"Remove {len(self.reference_paths) - MAX_REFERENCE_IMAGES} image(s) and try again."
+            )
+            return
         
         if not self.reference_paths:
             reply = QMessageBox.question(
@@ -335,41 +380,61 @@ class GenerateTab(QWidget):
             system_prompt = DEFAULT_SYSTEM_PROMPT
         
         aspect_ratio = self.aspect_combo.currentText()
+        output_size = output_size_for_aspect_ratio(aspect_ratio)
+        estimate = estimate_generation_cost(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            image_paths=list(self.reference_paths),
+            output_size=output_size,
+        )
+        self._cost_estimate_label.setText(
+            f"{format_cost_estimate(estimate)} • output {output_size}"
+        )
         
         # Check API key before starting worker
-        api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        api_key = os.environ.get("OPENAI_API_KEY", "").strip()
         if not api_key:
-            logger.info("GEMINI_API_KEY not found in environment, requesting from user.")
+            logger.info("OPENAI_API_KEY not found in environment, requesting from user.")
             key, ok = QInputDialog.getText(
                 self, "API Key Required",
-                "Please enter your Gemini API Key.\nIt will be saved locally so you don't have to enter it again.",
+                "Please enter your OpenAI API Key.\nIt will be saved locally so you don't have to enter it again.",
                 QLineEdit.EchoMode.Password
             )
             if ok and key.strip():
                 api_key = key.strip()
-                os.environ["GEMINI_API_KEY"] = api_key
+                os.environ["OPENAI_API_KEY"] = api_key
                 env_path = get_env_path()
                 logger.info(f"Saving API key to env file at {env_path}")
                 
                 key_exists = False
+                env_text = ""
                 if env_path.exists():
                     try:
                         with open(env_path, "r", encoding="utf-8") as f:
-                            if "GEMINI_API_KEY" in f.read():
+                            env_text = f.read()
+                            if "OPENAI_API_KEY" in env_text:
                                 key_exists = True
                     except Exception as e:
                         logger.error(f"Error reading env file: {e}")
                 
-                if not key_exists:
-                    try:
+                try:
+                    if key_exists:
+                        lines = []
+                        for line in env_text.splitlines():
+                            if line.startswith("OPENAI_API_KEY="):
+                                lines.append(f"OPENAI_API_KEY={api_key}")
+                            else:
+                                lines.append(line)
+                        env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                    else:
                         # Ensure we start on a new line if the file doesn't end with one
                         prefix = "\n" if env_path.exists() and env_path.stat().st_size > 0 else ""
                         with open(env_path, "a", encoding="utf-8") as f:
-                            f.write(f"{prefix}GEMINI_API_KEY={api_key}\n")
-                        logger.info("Saved API key successfully.")
-                    except Exception as e:
-                        logger.error(f"Could not save API key to {env_path}: {e}")
-                        print(f"Warning: Could not save API key to {env_path}: {e}")
+                            f.write(f"{prefix}OPENAI_API_KEY={api_key}\n")
+                    logger.info("Saved API key successfully.")
+                except Exception as e:
+                    logger.error(f"Could not save API key to {env_path}: {e}")
+                    print(f"Warning: Could not save API key to {env_path}: {e}")
             else:
                 logger.info("Generation cancelled because user did not provide an API key.")
                 return  # User cancelled
@@ -393,8 +458,8 @@ class GenerateTab(QWidget):
         self.parent_window.status.showMessage("⏳ Generating image…")
         
         # Launch worker
-        logger.info("Starting GeminiWorker background thread...")
-        self._worker = GeminiWorker(
+        logger.info("Starting OpenAIWorker background thread...")
+        self._worker = OpenAIWorker(
             prompt=prompt,
             system_prompt=system_prompt,
             image_paths=list(self.reference_paths),
@@ -529,5 +594,3 @@ class GenerateTab(QWidget):
                     Qt.TransformationMode.SmoothTransformation
                 )
                 self._result_label.setPixmap(scaled)
-
-

@@ -4,6 +4,7 @@ __pycache__/
 build/
 dist/
 *.spec
-.env.*
+.env
 icon/*
 .agents/*
+.DS_Store

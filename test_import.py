@@ -3,8 +3,7 @@ import traceback
 
 def main():
     try:
-        from google import genai
-        from google.genai import types
+        import requests
         print("Import successful")
     except ImportError as e:
         print(f"ImportError: {e}")
