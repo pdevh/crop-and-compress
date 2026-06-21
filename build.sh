@@ -35,7 +35,24 @@ python -m pip install pyinstaller
 # 4. Run PyInstaller based on OS
 if [[ "${OS_NAME}" == "Darwin"* ]]; then
     echo "Building macOS App Bundle (.app)..."
+    
+    ICON_ARG=""
+    if [ -f "icon/app.icns" ]; then
+        ICON_ARG="--icon=icon/app.icns"
+    else
+        # Find any .icns file inside the icon/ directory
+        FOUND_ICON=$(find icon -maxdepth 1 -name "*.icns" 2>/dev/null | head -n 1)
+        if [ -n "$FOUND_ICON" ]; then
+            ICON_ARG="--icon=$FOUND_ICON"
+        fi
+    fi
+    
+    if [ -n "$ICON_ARG" ]; then
+        echo "Using macOS icon: $ICON_ARG"
+    fi
+
     pyinstaller --noconfirm --clean --windowed \
+        $ICON_ARG \
         --name="CropAndCompress" \
         crop_and_compress.py
     
@@ -46,7 +63,24 @@ if [[ "${OS_NAME}" == "Darwin"* ]]; then
 
 elif [[ "${OS_NAME}" == "MINGW"* || "${OS_NAME}" == "MSYS"* || "${OS_NAME}" == "CYGWIN"* ]]; then
     echo "Building Windows Executable (.exe)..."
+    
+    ICON_ARG=""
+    if [ -f "icon/app.ico" ]; then
+        ICON_ARG="--icon=icon/app.ico"
+    else
+        # Find any .ico file inside the icon/ directory
+        FOUND_ICON=$(find icon -maxdepth 1 -name "*.ico" 2>/dev/null | head -n 1)
+        if [ -n "$FOUND_ICON" ]; then
+            ICON_ARG="--icon=$FOUND_ICON"
+        fi
+    fi
+    
+    if [ -n "$ICON_ARG" ]; then
+        echo "Using Windows icon: $ICON_ARG"
+    fi
+
     pyinstaller --noconfirm --clean --onefile --windowed \
+        $ICON_ARG \
         --name="CropAndCompress" \
         crop_and_compress.py
         
@@ -58,7 +92,22 @@ elif [[ "${OS_NAME}" == "MINGW"* || "${OS_NAME}" == "MSYS"* || "${OS_NAME}" == "
 else
     echo "Warning: Building on an untested OS: ${OS_NAME}."
     echo "Attempting generic single-file compilation..."
+    
+    ICON_ARG=""
+    if [ -f "icon/app.ico" ]; then
+        ICON_ARG="--icon=icon/app.ico"
+    elif [ -f "icon/app.icns" ]; then
+        ICON_ARG="--icon=icon/app.icns"
+    else
+        # Search for any .ico or .icns file
+        FOUND_ICON=$(find icon -maxdepth 1 \( -name "*.ico" -o -name "*.icns" \) 2>/dev/null | head -n 1)
+        if [ -n "$FOUND_ICON" ]; then
+            ICON_ARG="--icon=$FOUND_ICON"
+        fi
+    fi
+    
     pyinstaller --noconfirm --clean --onefile --windowed \
+        $ICON_ARG \
         --name="CropAndCompress" \
         crop_and_compress.py
 fi
