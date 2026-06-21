@@ -103,31 +103,15 @@ class GenerateTab(QWidget):
         prompt_layout = QVBoxLayout(prompt_group)
         
         self.prompt_edit = QTextEdit()
-        self.prompt_edit.setPlaceholderText("Describe what you want to generate…\ne.g. 'A fierce tiger in traditional Japanese woodblock print style'")
-        self.prompt_edit.setMinimumHeight(80)
-        self.prompt_edit.setMaximumHeight(120)
+        self.prompt_edit.setPlainText(DEFAULT_SYSTEM_PROMPT + "\n\n")
+        self.prompt_edit.setMinimumHeight(150)
+        self.prompt_edit.setMaximumHeight(200)
         self.prompt_edit.textChanged.connect(self._update_cost_estimate)
 
         prompt_layout.addWidget(self.prompt_edit)
         left_panel.addWidget(prompt_group)
         
-        # System prompt (collapsible)
-        self._sys_prompt_visible = False
-        sys_toggle_btn = QPushButton("▶  System Prompt (Advanced)")
 
-        sys_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        sys_toggle_btn.clicked.connect(lambda: self._toggle_system_prompt(sys_toggle_btn))
-        left_panel.addWidget(sys_toggle_btn)
-        
-        self.system_prompt_edit = QTextEdit()
-        self.system_prompt_edit.setPlainText(DEFAULT_SYSTEM_PROMPT)
-        self.system_prompt_edit.setVisible(False)
-        self.system_prompt_edit.setMinimumHeight(100)
-        self.system_prompt_edit.setMaximumHeight(180)
-        self.system_prompt_edit.textChanged.connect(self._update_cost_estimate)
-
-        left_panel.addWidget(self.system_prompt_edit)
-        
         # Settings row
         settings_row = QHBoxLayout()
         
@@ -140,6 +124,16 @@ class GenerateTab(QWidget):
         self.aspect_combo.currentTextChanged.connect(self._update_cost_estimate)
         ar_layout.addWidget(self.aspect_combo)
         settings_row.addWidget(ar_group)
+        
+        # Resolution tier
+        res_group = QGroupBox("Resolution")
+        res_layout = QHBoxLayout(res_group)
+        self.res_combo = QComboBox()
+        self.res_combo.addItems(["1K", "2K", "4K"])
+        self.res_combo.setCurrentText("1K")
+        self.res_combo.currentTextChanged.connect(self._update_cost_estimate)
+        res_layout.addWidget(self.res_combo)
+        settings_row.addWidget(res_group)
         
         # Output folder
         out_group = QGroupBox("Output Folder")
@@ -237,19 +231,17 @@ class GenerateTab(QWidget):
         main_layout.addLayout(right_panel, 1)
         self._update_cost_estimate()
     
-    # ── System prompt toggle ─────────────────────────────────────────────
-    
-    def _toggle_system_prompt(self, btn):
-        self._sys_prompt_visible = not self._sys_prompt_visible
-        self.system_prompt_edit.setVisible(self._sys_prompt_visible)
-        arrow = "▼" if self._sys_prompt_visible else "▶"
-        btn.setText(f"{arrow}  System Prompt (Advanced)")
+
     
     # ── Reference image management ───────────────────────────────────────
     
     def _add_references(self):
+        start_dir = ""
+        if hasattr(self.parent_window, "crop_tab") and self.parent_window.crop_tab.files:
+            start_dir = str(self.parent_window.crop_tab.files[0].parent)
+            
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select reference images", "",
+            self, "Select reference images", start_dir,
             "Images (*.png *.jpg *.jpeg *.webp *.bmp *.tiff *.tif)"
         )
         if paths:
@@ -294,12 +286,11 @@ class GenerateTab(QWidget):
             return
 
         prompt = self.prompt_edit.toPlainText().strip()
-        system_prompt = self.system_prompt_edit.toPlainText().strip() or DEFAULT_SYSTEM_PROMPT
         aspect_ratio = self.aspect_combo.currentText()
-        output_size = output_size_for_aspect_ratio(aspect_ratio)
+        resolution = self.res_combo.currentText()
+        output_size = output_size_for_aspect_ratio(aspect_ratio, resolution)
         estimate = estimate_generation_cost(
             prompt=prompt,
-            system_prompt=system_prompt,
             image_paths=list(self.reference_paths),
             output_size=output_size,
         )
@@ -375,15 +366,11 @@ class GenerateTab(QWidget):
                 logger.info("Generation aborted by user due to lack of references.")
                 return
         
-        system_prompt = self.system_prompt_edit.toPlainText().strip()
-        if not system_prompt:
-            system_prompt = DEFAULT_SYSTEM_PROMPT
-        
         aspect_ratio = self.aspect_combo.currentText()
-        output_size = output_size_for_aspect_ratio(aspect_ratio)
+        resolution = self.res_combo.currentText()
+        output_size = output_size_for_aspect_ratio(aspect_ratio, resolution)
         estimate = estimate_generation_cost(
             prompt=prompt,
-            system_prompt=system_prompt,
             image_paths=list(self.reference_paths),
             output_size=output_size,
         )
@@ -461,9 +448,9 @@ class GenerateTab(QWidget):
         logger.info("Starting OpenAIWorker background thread...")
         self._worker = OpenAIWorker(
             prompt=prompt,
-            system_prompt=system_prompt,
             image_paths=list(self.reference_paths),
             aspect_ratio=aspect_ratio,
+            resolution=resolution,
         )
         self._worker.image_ready.connect(self._on_image_ready)
         self._worker.text_chunk.connect(self._on_text_chunk)
@@ -505,6 +492,9 @@ class GenerateTab(QWidget):
             self._result_label.setText("⚠️ Failed to render generated image")
         
         self.save_btn.setEnabled(True)
+        
+        if self.output_dir and self.output_dir.is_dir():
+            self._save_result()
     
     def _on_text_chunk(self, text: str):
         logger.debug(f"Text response chunk: '{text}'")

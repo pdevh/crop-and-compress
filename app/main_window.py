@@ -56,6 +56,20 @@ class MainWindow(QMainWindow):
         else:
             self.setWindowTitle("Crop & Compress — Generate")
             self.status_stats_label.setText("")
+            
+            # Auto-sync references from crop_tab
+            crop_files = set(self.crop_tab.files)
+            gen_files = set(self.generate_tab.reference_paths)
+            
+            # Only auto-sync if we don't have any references that are outside of crop_tab.files
+            if not (gen_files - crop_files):
+                included_crop_files = [
+                    f for i, f in enumerate(self.crop_tab.files)
+                    if self.crop_tab.included[i]
+                ]
+                self.generate_tab.reference_paths = included_crop_files.copy()
+                self.generate_tab._rebuild_thumbnails()
+            
             ref_count = len(self.generate_tab.reference_paths)
             if ref_count:
                 self.status.showMessage(f"{ref_count} reference image(s) loaded")

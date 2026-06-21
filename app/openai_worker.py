@@ -18,12 +18,10 @@ OPENAI_IMAGE_MODEL = "gpt-image-2"
 OPENAI_IMAGE_ENDPOINT = "https://api.openai.com/v1/images"
 MAX_REFERENCE_IMAGES = 16
 
-OUTPUT_SIZES_BY_ASPECT_RATIO = {
-    "1:1": "1024x1024",
-    "3:4": "1024x1360",
-    "4:3": "1360x1024",
-    "9:16": "1024x1824",
-    "16:9": "1824x1024",
+RESOLUTION_TIER_LONG_EDGE = {
+    "1K": 1024,
+    "2K": 2048,
+    "4K": 3840,
 }
 
 OUTPUT_FORMAT = "png"
@@ -65,8 +63,25 @@ texture, and emotional energy. Treat this as artwork ready to
 be printed."""
 
 
-def output_size_for_aspect_ratio(aspect_ratio: str) -> str:
-    return OUTPUT_SIZES_BY_ASPECT_RATIO.get(aspect_ratio, "1024x1024")
+def output_size_for_aspect_ratio(aspect_ratio: str, resolution: str = "1K") -> str:
+    # Ensure dimensions are multiples of 16
+    def round_16(val: float) -> int:
+        return max(16, int(round(val / 16.0) * 16))
+
+    long_edge = RESOLUTION_TIER_LONG_EDGE.get(resolution, 1024)
+    try:
+        w_ratio, h_ratio = map(float, aspect_ratio.split(":"))
+    except ValueError:
+        w_ratio, h_ratio = 1.0, 1.0
+
+    if w_ratio > h_ratio:
+        width = long_edge
+        height = round_16(width * (h_ratio / w_ratio))
+    else:
+        height = long_edge
+        width = round_16(height * (w_ratio / h_ratio))
+        
+    return f"{width}x{height}"
 
 
 def parse_size(size: str) -> tuple[int, int]:
@@ -84,7 +99,6 @@ def estimate_text_tokens(text: str) -> int:
 
 def estimate_generation_cost(
     prompt: str,
-    system_prompt: str,
     image_paths: list[Path],
     output_size: str,
 ) -> dict[str, float | int]:
@@ -99,7 +113,7 @@ def estimate_generation_cost(
 
     output_width, output_height = parse_size(output_size)
     output_tokens = estimate_image_tokens(output_width, output_height)
-    text_tokens = estimate_text_tokens(f"{system_prompt}\n\n{prompt}")
+    text_tokens = estimate_text_tokens(prompt)
 
     text_cost = text_tokens * TEXT_INPUT_DOLLARS_PER_1M / 1_000_000
     image_input_cost = image_input_tokens * IMAGE_INPUT_DOLLARS_PER_1M / 1_000_000
@@ -133,24 +147,24 @@ class OpenAIWorker(QThread):
     def __init__(
         self,
         prompt: str,
-        system_prompt: str,
         image_paths: list[Path],
         aspect_ratio: str,
+        resolution: str = "1K",
     ):
         super().__init__()
         self.prompt = prompt
-        self.system_prompt = system_prompt
         self.image_paths = image_paths
         self.aspect_ratio = aspect_ratio
-        self.output_size = output_size_for_aspect_ratio(aspect_ratio)
+        self.resolution = resolution
+        self.output_size = output_size_for_aspect_ratio(aspect_ratio, resolution)
         self._cancelled = False
         logger.debug(
-            "Initialized OpenAIWorker with prompt_len=%s, system_prompt_len=%s, "
-            "references=%s, aspect_ratio=%s, output_size=%s",
+            "Initialized OpenAIWorker with prompt_len=%s, "
+            "references=%s, aspect_ratio=%s, resolution=%s, output_size=%s",
             len(prompt),
-            len(system_prompt),
             len(image_paths),
             aspect_ratio,
+            resolution,
             self.output_size,
         )
 
@@ -228,10 +242,9 @@ class OpenAIWorker(QThread):
             self.finished_signal.emit()
 
     def _build_payload(self) -> dict:
-        prompt = f"{self.system_prompt}\n\nUSER PROMPT:\n{self.prompt}"
         payload = {
             "model": OPENAI_IMAGE_MODEL,
-            "prompt": prompt,
+            "prompt": self.prompt,
             "n": 1,
             "size": self.output_size,
             "quality": QUALITY,
