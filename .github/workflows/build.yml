@@ -36,7 +36,22 @@ jobs:
             ENTRY_POINT=$(ls *.py | head -n 1)
           fi
           echo "Building entry point: $ENTRY_POINT"
-          pyinstaller --noconfirm --clean --windowed "$ENTRY_POINT"
+          
+          # Dynamic icon detection
+          ICON_ARG=""
+          if [ -f "icon/app.icns" ]; then
+            ICON_ARG="--icon=icon/app.icns"
+          else
+            FOUND_ICON=$(find icon -maxdepth 1 -name "*.icns" 2>/dev/null | head -n 1)
+            if [ -n "$FOUND_ICON" ]; then
+              ICON_ARG="--icon=$FOUND_ICON"
+            fi
+          fi
+          if [ -n "$ICON_ARG" ]; then
+            echo "Using macOS icon: $ICON_ARG"
+          fi
+          
+          pyinstaller --noconfirm --clean --windowed $ICON_ARG "$ENTRY_POINT"
 
       - name: Zip macOS App Bundle
         run: |
@@ -85,7 +100,22 @@ jobs:
             ENTRY_POINT=$(ls *.py | head -n 1)
           fi
           echo "Building entry point: $ENTRY_POINT"
-          pyinstaller --noconfirm --clean --onefile --windowed "$ENTRY_POINT"
+          
+          # Dynamic icon detection (using bash syntax since shell: bash is specified)
+          ICON_ARG=""
+          if [ -f "icon/app.ico" ]; then
+            ICON_ARG="--icon=icon/app.ico"
+          else
+            FOUND_ICON=$(find icon -maxdepth 1 -name "*.ico" 2>/dev/null | head -n 1)
+            if [ -n "$FOUND_ICON" ]; then
+              ICON_ARG="--icon=$FOUND_ICON"
+            fi
+          fi
+          if [ -n "$ICON_ARG" ]; then
+            echo "Using Windows icon: $ICON_ARG"
+          fi
+          
+          pyinstaller --noconfirm --clean --onefile --windowed $ICON_ARG "$ENTRY_POINT"
 
       - name: Prepare Windows Artifact
         shell: bash
